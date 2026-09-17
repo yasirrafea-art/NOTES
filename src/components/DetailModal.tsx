@@ -1,29 +1,31 @@
 import { useEffect, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { CalendarDays, Trash2, X } from 'lucide-react'
 import { db } from '../db'
 import { fmtDateTime, nowISO } from '../lib/format'
 import { KIND_OPTIONS, PRIORITY_OPTIONS, STATUS_OPTIONS } from '../lib/constants'
 import { logActivity } from '../lib/activity'
+import { api, CONNECTION_ERROR, type EntryPatch } from '../lib/api'
+import { useEntry, useProjects } from '../lib/data'
 import type { ActivityType, EntryKind, Priority, TaskStatus } from '../types'
 import AttachmentSection from './AttachmentSection'
 
 interface Props {
-  entryId: number
+  entryId: string
   onClose: () => void
 }
 
 export default function DetailModal({ entryId, onClose }: Props) {
-  const entry = useLiveQuery(() => db.entries.get(entryId), [entryId])
-  const projects = useLiveQuery(() => db.projects.toArray(), []) ?? []
+  const { data: entry } = useEntry(entryId)
+  const { data: projects = [] } = useProjects()
   const [text, setText] = useState('')
   const [description, setDescription] = useState('')
   const [kind, setKind] = useState<EntryKind>('task')
   const [priority, setPriority] = useState<Priority>('normal')
   const [status, setStatus] = useState<TaskStatus>('not_started')
-  const [projectId, setProjectId] = useState<number | ''>('')
+  const [projectId, setProjectId] = useState<string>('')
   const [dueDate, setDueDate] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (entry) {
@@ -39,60 +41,74 @@ export default function DetailModal({ entryId, onClose }: Props) {
   }, [entry?.id])
 
   if (!entry) return null
+  const item = entry
 
-  const project = projects.find((p) => p.id === entry.projectId)
+  const project = projects.find((p) => p.id === item.projectId)
 
   async function save() {
-    if (!entry || !text.trim()) return
+    if (!text.trim() || saving) return
     setSaving(true)
-    const isTask = kind === 'task'
-    const isDone = isTask && status === 'done'
-    const wasDone = entry.status === 'done'
-    const nextProjectId = projectId !== '' ? Number(projectId) : null
-    const nextText = text.trim()
-    const nextDescription = description.trim() || undefined
-    await db.entries.update(entryId, {
-      kind,
-      text: nextText,
-      priority,
-      status: isTask ? status : undefined,
-      projectId: nextProjectId,
-      dueDate: dueDate || null,
-      description: nextDescription,
-      completedAt: isTask && isDone ? (entry.completedAt ?? nowISO()) : null,
-      updatedAt: nowISO(),
-    })
+    setError(null)
+    try {
+      const isTask = kind === 'task'
+      const isDone = isTask && status === 'done'
+      const wasDone = item.status === 'done'
+      const nextProjectId = projectId !== '' ? projectId : null
+      const nextText = text.trim()
+      const nextDescription = description.trim() || undefined
 
-    let actType: ActivityType | null = null
-    if (isTask && (entry.status ?? null) !== status) {
-      actType = isDone ? 'complete' : wasDone ? 'reopen' : 'status'
-    } else if (
-      nextText !== entry.text ||
-      kind !== entry.kind ||
-      priority !== entry.priority ||
-      nextDescription !== (entry.description ?? undefined) ||
-      nextProjectId !== (entry.projectId ?? null) ||
-      (dueDate || null) !== (entry.dueDate ?? null)
-    ) {
-      actType = 'edit'
-    }
-    if (actType) {
-      await logActivity({
-        entryId: entryId,
-        projectId: nextProjectId,
-        type: actType,
-        kind: kind,
+      const patch: EntryPatch = {
+        kind,
         text: nextText,
-      })
+        priority,
+        projectId: nextProjectId,
+        dueDate: dueDate || null,
+        description: nextDescription,
+        completedAt: isTask && isDone ? (item.completedAt ?? nowISO()) : null,
+      }
+      if (isTask) patch.status = status
+      await api.updateEntry(entryId, patch)
+
+      let actType: ActivityType | null = null
+      if (isTask && (item.status ?? null) !== status) {
+        actType = isDone ? 'complete' : wasDone ? 'reopen' : 'status'
+      } else if (
+        nextText !== item.text ||
+        kind !== item.kind ||
+        priority !== item.priority ||
+        nextDescription !== (item.description ?? undefined) ||
+        nextProjectId !== (item.projectId ?? null) ||
+        (dueDate || null) !== (item.dueDate ?? null)
+      ) {
+        actType = 'edit'
+      }
+      if (actType) {
+        await logActivity({
+          entryId,
+          projectId: nextProjectId,
+          type: actType,
+          kind,
+          text: nextText,
+        })
+      }
+    } catch (err) {
+      console.error('[دفتر العمل] تعذر حفظ التعديلات:', err)
+      setError(err instanceof Error ? err.message : CONNECTION_ERROR)
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   async function remove() {
     if (!window.confirm('حذف هذا السجل نهائيًا؟')) return
-    await db.attachments.where('entryId').equals(entryId).delete()
-    await db.entries.delete(entryId)
-    onClose()
+    try {
+      await db.attachments.where('entryId').equals(entryId).delete()
+      await api.deleteEntry(entryId)
+      onClose()
+    } catch (err) {
+      console.error('[دفتر العمل] تعذر حذف السجل:', err)
+      setError(err instanceof Error ? err.message : CONNECTION_ERROR)
+    }
   }
 
   return (
@@ -213,7 +229,7 @@ export default function DetailModal({ entryId, onClose }: Props) {
             </label>
             <select
               value={projectId}
-              onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}
+              onChange={(e) => setProjectId(e.target.value)}
               className="input"
             >
               <option value="">بدون مشروع</option>
@@ -235,6 +251,10 @@ export default function DetailModal({ entryId, onClose }: Props) {
             )}
             {project && <p className="mt-1">المشروع: {project.name}</p>}
           </div>
+
+          {error && (
+            <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-600">{error}</p>
+          )}
 
           <AttachmentSection entryId={entryId} />
 

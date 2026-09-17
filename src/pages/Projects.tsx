@@ -1,22 +1,23 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { FolderKanban, Plus } from 'lucide-react'
-import { db } from '../db'
-import { nowISO, percentDone } from '../lib/format'
+import { percentDone } from '../lib/format'
 import { PROJECT_COLORS, PROJECT_COLOR_CLASS } from '../lib/constants'
+import { api, CONNECTION_ERROR } from '../lib/api'
+import { useEntries, useProjects } from '../lib/data'
 import EmptyState from '../components/EmptyState'
 
 export default function Projects() {
-  const projects = useLiveQuery(() => db.projects.toArray(), []) ?? []
-  const entries = useLiveQuery(() => db.entries.toArray(), []) ?? []
+  const { data: projects = [] } = useProjects()
+  const { data: entries = [] } = useEntries({ limit: 1000 })
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
   const [color, setColor] = useState<string>('violet')
+  const [error, setError] = useState<string | null>(null)
 
   const stats = useMemo(() => {
     const map = new Map<
-      number,
+      string,
       { total: number; done: number }
     >()
     for (const e of entries) {
@@ -32,16 +33,19 @@ export default function Projects() {
   async function create() {
     const n = name.trim()
     if (!n) return
-    const t = nowISO()
-    await db.projects.add({
-      name: n,
-      description: desc.trim() || undefined,
-      color,
-      createdAt: t,
-      updatedAt: t,
-    })
-    setName('')
-    setDesc('')
+    setError(null)
+    try {
+      await api.addProject({
+        name: n,
+        description: desc.trim() || null,
+        color,
+      })
+      setName('')
+      setDesc('')
+    } catch (err) {
+      console.error('[دفتر العمل] تعذر إنشاء المشروع:', err)
+      setError(err instanceof Error ? err.message : CONNECTION_ERROR)
+    }
   }
 
   return (
@@ -86,6 +90,7 @@ export default function Projects() {
           <Plus className="h-4 w-4" />
           إنشاء المشروع
         </button>
+        {error && <p className="mt-2 text-sm font-medium text-red-600">{error}</p>}
       </div>
 
       <div className="mt-5 space-y-3">
@@ -97,7 +102,7 @@ export default function Projects() {
           />
         )}
         {projects.map((p) => {
-          const id = p.id as number
+          const id = p.id
           const s = stats.get(id) ?? { total: 0, done: 0 }
           const pct = percentDone(s.done, s.total)
           return (

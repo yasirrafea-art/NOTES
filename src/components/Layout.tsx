@@ -11,6 +11,7 @@ import {
   Database,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { isSupabaseConfigured } from '../lib/supabase'
 
 const sidebarNav: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: '/', label: 'الرئيسية', icon: House, end: true },
@@ -61,7 +62,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="px-5 py-4">
           <p className="flex items-center gap-1.5 text-xs text-slate-400">
             <Database className="h-3.5 w-3.5" />
-            بياناتك محفوظة محليًا على جهازك
+            {isSupabaseConfigured ? 'بياناتك محفوظة في السحابة (Supabase)' : 'التخزين السحابي غير مفعّل بعد'}
           </p>
         </div>
       </aside>
@@ -86,7 +87,19 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
 
       <main className="pb-28 lg:ps-72 lg:pb-10">
-        <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">{children}</div>
+        <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">
+          {!isSupabaseConfigured && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">لم يتم ربط قاعدة البيانات بعد</p>
+              <p className="mt-1 text-amber-800">
+                أضف المفتاحين <code className="rounded bg-amber-100 px-1">VITE_SUPABASE_URL</code> و{' '}
+                <code className="rounded bg-amber-100 px-1">VITE_SUPABASE_ANON_KEY</code> في ملف .env ثم أعد
+                التشغيل.
+              </p>
+            </div>
+          )}
+          {children}
+        </div>
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white/90 backdrop-blur lg:hidden">

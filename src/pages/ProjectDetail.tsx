@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { CheckCircle2, Circle, FolderOpen, ListTodo, NotebookPen, Pencil, Trash2 } from 'lucide-react'
 import { db } from '../db'
-import { nowISO, percentDone } from '../lib/format'
+import { percentDone } from '../lib/format'
 import { PROJECT_COLORS, PROJECT_COLOR_CLASS } from '../lib/constants'
+import { api } from '../lib/api'
+import { useEntriesByProject, useProject } from '../lib/data'
 import QuickAdd from '../components/QuickAdd'
 import EntryCard from '../components/EntryCard'
 import DetailModal from '../components/DetailModal'
@@ -14,20 +15,17 @@ import EmptyState from '../components/EmptyState'
 export default function ProjectDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const projectId = Number(id)
-  const project = useLiveQuery(() => db.projects.get(projectId), [projectId])
-  const entries = useLiveQuery(
-    () => db.entries.where('projectId').equals(projectId).toArray(),
-    [projectId],
-  )
-  const [openId, setOpenId] = useState<number | null>(null)
+  const projectId = id ?? ''
+  const { data: project, loading } = useProject(projectId || null)
+  const { data: entries = [] } = useEntriesByProject(projectId || null)
+  const [openId, setOpenId] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
   const [color, setColor] = useState('violet')
 
   const list = useMemo(() => {
-    const arr = entries ?? []
+    const arr = entries
     return [...arr].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
   }, [entries])
 
@@ -35,6 +33,8 @@ export default function ProjectDetail() {
   const noteList = list.filter((e) => e.kind !== 'task')
   const doneCount = taskList.filter((e) => e.status === 'done').length
   const pct = percentDone(doneCount, taskList.length)
+
+  if (loading) return null
 
   if (!project) {
     return (
@@ -53,23 +53,27 @@ export default function ProjectDetail() {
 
   async function saveEdit() {
     if (!name.trim()) return
-    await db.projects.update(projectId, {
-      name: name.trim(),
-      description: desc.trim() || undefined,
-      color,
-      updatedAt: nowISO(),
-    })
-    setEditing(false)
+    try {
+      await api.updateProject(current.id, {
+        name: name.trim(),
+        description: desc.trim() || null,
+        color,
+      })
+      setEditing(false)
+    } catch (err) {
+      console.error('[دفتر العمل] تعذر حفظ المشروع:', err)
+    }
   }
 
   async function remove() {
     if (!window.confirm('حذف المشروع؟ ستبقى سجلاته لكن بدون ربط بالمشروع.')) return
-    await db.entries.where('projectId').equals(projectId).modify((e) => {
-      e.projectId = null
-    })
-    await db.attachments.where('projectId').equals(projectId).delete()
-    await db.projects.delete(projectId)
-    navigate('/projects')
+    try {
+      await db.attachments.where('projectId').equals(current.id).delete()
+      await api.deleteProject(current.id)
+      navigate('/projects')
+    } catch (err) {
+      console.error('[دفتر العمل] تعذر حذف المشروع:', err)
+    }
   }
 
   return (
@@ -152,7 +156,7 @@ export default function ProjectDetail() {
       </div>
 
       <div className="mt-4">
-        <QuickAdd defaultKind="task" defaultProjectId={projectId} title="إضافة مهمة للمشروع" />
+        <QuickAdd defaultKind="task" defaultProjectId={project.id} title="إضافة مهمة للمشروع" />
       </div>
 
       <section className="mt-6">
@@ -162,7 +166,7 @@ export default function ProjectDetail() {
             <EntryCard
               key={e.id}
               entry={e}
-              onOpen={() => setOpenId(e.id!)}
+              onOpen={() => setOpenId(e.id)}
             />
           ))}
           {taskList.length === 0 && (
@@ -176,7 +180,7 @@ export default function ProjectDetail() {
           <h2 className="font-bold text-slate-800">ملاحظات وتوجيهات المشروع</h2>
           <div className="mt-3 space-y-3">
             {noteList.map((e) => (
-              <EntryCard key={e.id} entry={e} onOpen={() => setOpenId(e.id!)} />
+              <EntryCard key={e.id} entry={e} onOpen={() => setOpenId(e.id)} />
             ))}
           </div>
         </section>
@@ -184,7 +188,7 @@ export default function ProjectDetail() {
 
       <section className="card mt-8 p-4">
         <h2 className="font-semibold text-slate-800">مرفقات المشروع</h2>
-        <AttachmentSection projectId={projectId} />
+        <AttachmentSection projectId={project.id} />
         <div className="mt-3 flex items-center gap-1 text-xs text-slate-400">
           {doneCount === taskList.length && taskList.length > 0 ? (
             <>

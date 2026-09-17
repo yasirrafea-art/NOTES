@@ -1,15 +1,14 @@
 import { useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronDown, ChevronUp, Plus, Zap } from 'lucide-react'
-import { db } from '../db'
 import { KIND_OPTIONS, PRIORITY_OPTIONS } from '../lib/constants'
-import { nowISO } from '../lib/format'
 import { logActivity } from '../lib/activity'
+import { api, CONNECTION_ERROR } from '../lib/api'
+import { useProjects } from '../lib/data'
 import type { EntryKind, Priority } from '../types'
 
 interface Props {
   defaultKind?: EntryKind
-  defaultProjectId?: number
+  defaultProjectId?: string
   title?: string
   subtitle?: string
 }
@@ -20,46 +19,53 @@ export default function QuickAdd({
   title = 'إضافة سريعة',
   subtitle,
 }: Props) {
-  const projects = useLiveQuery(() => db.projects.toArray(), []) ?? []
+  const { data: projects = [] } = useProjects()
   const [text, setText] = useState('')
   const [kind, setKind] = useState<EntryKind>(defaultKind)
   const [priority, setPriority] = useState<Priority>('normal')
   const [showMore, setShowMore] = useState(false)
   const [dueDate, setDueDate] = useState('')
-  const [projectId, setProjectId] = useState<number | ''>(defaultProjectId ?? '')
+  const [projectId, setProjectId] = useState<string>('')
   const [description, setDescription] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
-  const canSave = text.trim().length > 0
+  const canSave = text.trim().length > 0 && !saving
 
   async function save() {
     const t = text.trim()
-    if (!t) return
-    const date = nowISO()
-    const id = await db.entries.add({
-      kind,
-      text: t,
-      priority,
-      status: kind === 'task' ? 'not_started' : undefined,
-      projectId: projectId !== '' ? Number(projectId) : null,
-      dueDate: kind === 'task' ? dueDate || null : null,
-      description: description.trim() || undefined,
-      createdAt: date,
-      completedAt: null,
-      updatedAt: date,
-    })
-    await logActivity({
-      entryId: id,
-      projectId: projectId !== '' ? Number(projectId) : null,
-      type: 'add',
-      kind,
-      text: t,
-    })
-    setText('')
-    setDueDate('')
-    setDescription('')
-    setSaved(true)
-    window.setTimeout(() => setSaved(false), 1600)
+    if (!t || saving) return
+    setSaving(true)
+    setError(null)
+    try {
+      const created = await api.addEntry({
+        kind,
+        text: t,
+        priority,
+        projectId: defaultProjectId ?? (projectId || null),
+        dueDate: kind === 'task' ? dueDate || null : null,
+        description: description.trim() || null,
+      })
+      await logActivity({
+        entryId: created.id,
+        projectId: created.projectId ?? null,
+        type: 'add',
+        kind: created.kind,
+        text: created.text,
+      })
+      setText('')
+      setDueDate('')
+      setDescription('')
+      setProjectId('')
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 1600)
+    } catch (err) {
+      console.error('[دفتر العمل] فشل حفظ السجل:', err)
+      setError(err instanceof Error ? err.message : CONNECTION_ERROR)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -150,7 +156,7 @@ export default function QuickAdd({
                 </label>
                 <select
                   value={projectId}
-                  onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}
+                  onChange={(e) => setProjectId(e.target.value)}
                   className="input"
                 >
                   <option value="">بدون مشروع</option>
@@ -178,12 +184,18 @@ export default function QuickAdd({
         </div>
       )}
 
-      <div className="mt-4 flex items-center gap-3">
-        <button onClick={() => void save()} disabled={!canSave} className="btn-primary">
-          <Plus className="h-4 w-4" />
-          حفظ
-        </button>
-        {saved && <span className="text-sm font-medium text-emerald-600">تم الحفظ ✓</span>}
+      <div className="mt-4">
+        <div className="flex items-center gap-3">
+          <button onClick={() => void save()} disabled={!canSave} className="btn-primary">
+            <Plus className="h-4 w-4" />
+            {saving ? 'جارٍ الحفظ...' : 'حفظ'}
+          </button>
+          {saved && <span className="text-sm font-medium text-emerald-600">تم الحفظ ✓</span>}
+          {error && <span className="text-sm font-medium text-red-600">{error}</span>}
+        </div>
+        {defaultProjectId && (
+          <p className="mt-2 text-xs text-slate-400">ستُضاف هذه المهمة إلى المشروع الحالي تلقائيًا.</p>
+        )}
       </div>
     </section>
   )

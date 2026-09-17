@@ -1,4 +1,4 @@
-import * as api from './api'
+import { api } from './api'
 import type { ActivityType, EntryKind } from '../types'
 
 export function logActivity(a: {

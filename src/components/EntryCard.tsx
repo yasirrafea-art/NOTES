@@ -1,9 +1,9 @@
 import { Check } from 'lucide-react'
-import { db } from '../db'
 import type { Entry, Project } from '../types'
 import { dueLabel, fmtDateTime, nowISO, overdueText } from '../lib/format'
 import { PROJECT_COLOR_CLASS } from '../lib/constants'
 import { logActivity } from '../lib/activity'
+import { api } from '../lib/api'
 import { KindBadge, PriorityBadge, StatusBadge } from './Badges'
 
 interface Props {
@@ -26,18 +26,21 @@ export default function EntryCard({ entry, project, onOpen }: Props) {
 
   async function toggleDone() {
     const nextDone = !done
-    await db.entries.update(entry.id!, {
-      status: nextDone ? 'done' : 'not_started',
-      completedAt: nextDone ? nowISO() : null,
-      updatedAt: nowISO(),
-    })
-    await logActivity({
-      entryId: entry.id,
-      projectId: entry.projectId,
-      type: nextDone ? 'complete' : 'reopen',
-      kind: 'task',
-      text: entry.text,
-    })
+    try {
+      await api.updateEntry(entry.id, {
+        status: nextDone ? 'done' : 'not_started',
+        completedAt: nextDone ? nowISO() : null,
+      })
+      await logActivity({
+        entryId: entry.id,
+        projectId: entry.projectId,
+        type: nextDone ? 'complete' : 'reopen',
+        kind: 'task',
+        text: entry.text,
+      })
+    } catch (err) {
+      console.error('[دفتر العمل] تعذر تحديث المهمة:', err)
+    }
   }
 
   return (

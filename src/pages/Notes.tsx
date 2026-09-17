@@ -1,23 +1,22 @@
 import { useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { NotebookPen } from 'lucide-react'
 import type { EntryKind } from '../types'
-import { db } from '../db'
 import { KIND_OPTIONS } from '../lib/constants'
+import { useEntries, useProjects } from '../lib/data'
 import QuickAdd from '../components/QuickAdd'
 import EntryCard from '../components/EntryCard'
 import DetailModal from '../components/DetailModal'
 import EmptyState from '../components/EmptyState'
 
 export default function Notes() {
-  const entries = useLiveQuery(() => db.entries.orderBy('createdAt').reverse().toArray(), []) ?? []
-  const projects = useLiveQuery(() => db.projects.toArray(), []) ?? []
+  const { data: entries = [] } = useEntries({ notKind: 'task', limit: 1000 })
+  const { data: projects = [] } = useProjects()
   const [tab, setTab] = useState<EntryKind | 'all'>('all')
-  const [openId, setOpenId] = useState<number | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
 
-  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id as number, p])), [projects])
+  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
 
-  const notes = entries.filter((e) => e.kind !== 'task')
+  const notes = entries
   const filtered = notes.filter((e) => tab === 'all' || e.kind === tab)
 
   return (
@@ -48,8 +47,8 @@ export default function Notes() {
           <EntryCard
             key={e.id}
             entry={e}
-            project={projectMap.get(e.projectId ?? -1) ?? null}
-            onOpen={() => setOpenId(e.id!)}
+            project={projectMap.get(e.projectId ?? '') ?? null}
+            onOpen={() => setOpenId(e.id)}
           />
         ))}
         {filtered.length === 0 && (

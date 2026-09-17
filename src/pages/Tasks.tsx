@@ -1,24 +1,23 @@
 import { useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronDown, ChevronUp, ClipboardCheck } from 'lucide-react'
 import type { TaskStatus } from '../types'
-import { db } from '../db'
 import { STATUS_OPTIONS } from '../lib/constants'
+import { useEntries, useProjects } from '../lib/data'
 import QuickAdd from '../components/QuickAdd'
 import EntryCard from '../components/EntryCard'
 import DetailModal from '../components/DetailModal'
 import EmptyState from '../components/EmptyState'
 
 export default function Tasks() {
-  const entries = useLiveQuery(() => db.entries.orderBy('createdAt').reverse().toArray(), []) ?? []
-  const projects = useLiveQuery(() => db.projects.toArray(), []) ?? []
+  const { data: entries = [] } = useEntries({ kind: 'task', limit: 1000 })
+  const { data: projects = [] } = useProjects()
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all')
   const [showDone, setShowDone] = useState(false)
-  const [openId, setOpenId] = useState<number | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
 
-  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id as number, p])), [projects])
+  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
 
-  const tasks = entries.filter((e) => e.kind === 'task')
+  const tasks = entries
   const pending = tasks.filter((e) => e.status !== 'done')
   const done = tasks.filter((e) => e.status === 'done')
   const filtered = pending.filter((e) => statusFilter === 'all' || e.status === statusFilter)
@@ -51,8 +50,8 @@ export default function Tasks() {
           <EntryCard
             key={e.id}
             entry={e}
-            project={projectMap.get(e.projectId ?? -1) ?? null}
-            onOpen={() => setOpenId(e.id!)}
+            project={projectMap.get(e.projectId ?? '') ?? null}
+            onOpen={() => setOpenId(e.id)}
           />
         ))}
         {filtered.length === 0 && (
@@ -75,8 +74,8 @@ export default function Tasks() {
                 <EntryCard
                   key={e.id}
                   entry={e}
-                  project={projectMap.get(e.projectId ?? -1) ?? null}
-                  onOpen={() => setOpenId(e.id!)}
+                  project={projectMap.get(e.projectId ?? '') ?? null}
+                  onOpen={() => setOpenId(e.id)}
                 />
               ))}
             </div>

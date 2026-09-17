@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
 import {
   AlertTriangle,
   CalendarClock,
@@ -17,9 +16,9 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { ActivityType, Entry } from '../types'
-import { db } from '../db'
 import { fmtDateTime, percentDone, todayKey } from '../lib/format'
 import { KIND_META, PRIORITY_ORDER, PROJECT_COLOR_CLASS } from '../lib/constants'
+import { useEntries, useProjects, useActivities } from '../lib/data'
 import QuickAdd from '../components/QuickAdd'
 import EntryCard from '../components/EntryCard'
 import DetailModal from '../components/DetailModal'
@@ -73,16 +72,13 @@ const byPriority = (a: Entry, b: Entry) =>
   (a.createdAt < b.createdAt ? 1 : -1)
 
 export default function Home() {
-  const entries = useLiveQuery(() => db.entries.orderBy('createdAt').reverse().toArray(), []) ?? []
-  const projects = useLiveQuery(() => db.projects.toArray(), []) ?? []
-  const activities = useLiveQuery(
-    () => db.activities.orderBy('createdAt').reverse().limit(10).toArray(),
-    [],
-  ) ?? []
-  const [openId, setOpenId] = useState<number | null>(null)
+  const { data: entries = [], error: entriesError } = useEntries({ limit: 500 })
+  const { data: projects = [] } = useProjects()
+  const { data: activities = [] } = useActivities({ limit: 10 })
+  const [openId, setOpenId] = useState<string | null>(null)
 
   const projectMap = useMemo(
-    () => new Map(projects.map((p) => [p.id as number, p])),
+    () => new Map(projects.map((p) => [p.id, p])),
     [projects],
   )
 
@@ -109,7 +105,7 @@ export default function Home() {
   const recentNotes = notes.slice(0, 5)
 
   const projectStats = useMemo(() => {
-    const map = new Map<number, { total: number; done: number; pending: number }>()
+    const map = new Map<string, { total: number; done: number; pending: number }>()
     for (const e of entries) {
       if (e.kind !== 'task' || e.projectId == null) continue
       const s = map.get(e.projectId) ?? { total: 0, done: 0, pending: 0 }
@@ -125,8 +121,8 @@ export default function Home() {
     const sorted = [...projects].sort((a, b) =>
       a.createdAt < b.createdAt ? 1 : -1,
     )
-    const withPending = sorted.filter((p) => (projectStats.get(p.id!)?.pending ?? 0) > 0)
-    const rest = sorted.filter((p) => (projectStats.get(p.id!)?.pending ?? 0) === 0)
+    const withPending = sorted.filter((p) => (projectStats.get(p.id)?.pending ?? 0) > 0)
+    const rest = sorted.filter((p) => (projectStats.get(p.id)?.pending ?? 0) === 0)
     return [...withPending, ...rest].slice(0, 4)
   }, [projects, projectStats])
 
@@ -153,6 +149,12 @@ export default function Home() {
         ))}
       </div>
 
+      {entriesError && (
+        <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+          {entriesError}
+        </p>
+      )}
+
       <div className="mt-4">
         <QuickAdd />
       </div>
@@ -169,8 +171,8 @@ export default function Home() {
             <EntryCard
               key={e.id}
               entry={e}
-              project={projectMap.get(e.projectId ?? -1) ?? null}
-              onOpen={() => setOpenId(e.id!)}
+              project={projectMap.get(e.projectId ?? '') ?? null}
+              onOpen={() => setOpenId(e.id)}
             />
           ))}
           {todayTasks.length === 0 && (
@@ -197,8 +199,8 @@ export default function Home() {
               <EntryCard
                 key={e.id}
                 entry={e}
-                project={projectMap.get(e.projectId ?? -1) ?? null}
-                onOpen={() => setOpenId(e.id!)}
+                project={projectMap.get(e.projectId ?? '') ?? null}
+                onOpen={() => setOpenId(e.id)}
               />
             ))}
           </div>
@@ -223,8 +225,8 @@ export default function Home() {
             <EntryCard
               key={e.id}
               entry={e}
-              project={projectMap.get(e.projectId ?? -1) ?? null}
-              onOpen={() => setOpenId(e.id!)}
+              project={projectMap.get(e.projectId ?? '') ?? null}
+              onOpen={() => setOpenId(e.id)}
             />
           ))}
           {openTasks.length > 8 && (
@@ -258,8 +260,8 @@ export default function Home() {
             <EntryCard
               key={e.id}
               entry={e}
-              project={projectMap.get(e.projectId ?? -1) ?? null}
-              onOpen={() => setOpenId(e.id!)}
+              project={projectMap.get(e.projectId ?? '') ?? null}
+              onOpen={() => setOpenId(e.id)}
             />
           ))}
           {recentNotes.length === 0 && (
@@ -314,7 +316,7 @@ export default function Home() {
           />
           <div className="mt-3 space-y-2">
             {activeProjects.map((p) => {
-              const s = projectStats.get(p.id!) ?? { total: 0, done: 0 }
+              const s = projectStats.get(p.id) ?? { total: 0, done: 0 }
               const pct = percentDone(s.done, s.total)
               return (
                 <Link

@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { History } from 'lucide-react'
 import type { Entry } from '../types'
-import { db } from '../db'
 import { fmtTime, parseLocal, dateToDayKey, weekdayName } from '../lib/format'
 import { KIND_META } from '../lib/constants'
+import { useEntries } from '../lib/data'
 import DetailModal from '../components/DetailModal'
 import EmptyState from '../components/EmptyState'
 
@@ -15,9 +14,9 @@ interface DayGroup {
 }
 
 export default function Log() {
-  const entries = useLiveQuery(() => db.entries.orderBy('createdAt').reverse().toArray(), []) ?? []
   const [limit, setLimit] = useState(60)
-  const [openId, setOpenId] = useState<number | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
+  const { data: entries = [] } = useEntries({ limit })
 
   const groups = useMemo(() => {
     const map = new Map<string, DayGroup>()
@@ -63,7 +62,7 @@ export default function Log() {
                   return (
                     <button
                       key={e.id}
-                      onClick={() => setOpenId(e.id!)}
+                      onClick={() => setOpenId(e.id)}
                       className="group relative block w-full text-start"
                     >
                       <span

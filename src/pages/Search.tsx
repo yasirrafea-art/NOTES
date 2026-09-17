@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Search as SearchIcon, SearchX } from 'lucide-react'
-import { db } from '../db'
 import { percentDone } from '../lib/format'
 import { PROJECT_COLOR_CLASS } from '../lib/constants'
+import { useEntries, useProjects } from '../lib/data'
 import EntryCard from '../components/EntryCard'
 import DetailModal from '../components/DetailModal'
 import EmptyState from '../components/EmptyState'
@@ -23,13 +22,13 @@ function Mark({ text, q }: { text: string; q: string }) {
 
 export default function Search() {
   const [q, setQ] = useState('')
-  const [openId, setOpenId] = useState<number | null>(null)
-  const entries = useLiveQuery(() => db.entries.toArray(), []) ?? []
-  const projects = useLiveQuery(() => db.projects.toArray(), []) ?? []
+  const [openId, setOpenId] = useState<string | null>(null)
+  const { data: entries = [] } = useEntries({ limit: 500 })
+  const { data: projects = [] } = useProjects()
 
   const query = q.trim()
 
-  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id as number, p])), [projects])
+  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
 
   const entryResults = useMemo(() => {
     if (!query) return []
@@ -46,7 +45,7 @@ export default function Search() {
   }, [projects, query])
 
   const doneSet = useMemo(() => {
-    const m = new Map<number, { total: number; done: number }>()
+    const m = new Map<string, { total: number; done: number }>()
     for (const e of entries) {
       if (e.kind !== 'task' || e.projectId == null) continue
       const s = m.get(e.projectId) ?? { total: 0, done: 0 }
@@ -84,7 +83,7 @@ export default function Search() {
           <h2 className="text-sm font-bold text-slate-500">المشاريع ({projectResults.length})</h2>
           <div className="mt-2 space-y-2">
             {projectResults.map((p) => {
-              const s = doneSet.get(p.id!) ?? { total: 0, done: 0 }
+              const s = doneSet.get(p.id) ?? { total: 0, done: 0 }
               const pct = percentDone(s.done, s.total)
               return (
                 <Link key={p.id} to={`/projects/${p.id}`} className="card flex items-center gap-3 p-4 transition hover:shadow-md">
@@ -110,8 +109,8 @@ export default function Search() {
               <div key={e.id}>
                 <EntryCard
                   entry={e}
-                  project={projectMap.get(e.projectId ?? -1) ?? null}
-                  onOpen={() => setOpenId(e.id!)}
+                  project={projectMap.get(e.projectId ?? '') ?? null}
+                  onOpen={() => setOpenId(e.id)}
                 />
                 {e.description && e.description.toLowerCase().includes(query.toLowerCase()) && (
                   <p className="mt-1 px-4 text-xs text-slate-400">

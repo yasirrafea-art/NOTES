@@ -6,8 +6,8 @@ import { fmtSize, nowISO } from '../lib/format'
 import type { Attachment } from '../types'
 
 interface Props {
-  entryId?: number
-  projectId?: number
+  entryId?: string
+  projectId?: string
 }
 
 export default function AttachmentSection({ entryId, projectId }: Props) {
