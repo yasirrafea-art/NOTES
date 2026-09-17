@@ -11,7 +11,7 @@ import {
   Database,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { isSupabaseConfigured } from '../lib/supabase'
+import { isSupabaseConfigured, getSupabaseConfigStatus } from '../lib/supabase'
 
 const sidebarNav: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: '/', label: 'الرئيسية', icon: House, end: true },
@@ -42,6 +42,7 @@ function bottomLinkCls({ isActive }: { isActive: boolean }) {
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
+  const cfg = getSupabaseConfigStatus()
   return (
     <div className="min-h-dvh">
       <aside className="fixed start-0 top-0 bottom-0 z-40 hidden w-72 flex-col border-e border-slate-200 bg-white lg:flex">
@@ -90,12 +91,27 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">
           {!isSupabaseConfigured && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <p className="font-semibold">لم يتم ربط قاعدة البيانات بعد</p>
-              <p className="mt-1 text-amber-800">
-                أضف المفتاحين <code className="rounded bg-amber-100 px-1">VITE_SUPABASE_URL</code> و{' '}
-                <code className="rounded bg-amber-100 px-1">VITE_SUPABASE_ANON_KEY</code> في ملف .env ثم أعد
-                التشغيل.
-              </p>
+              <p className="font-semibold">Supabase غير مفعّل — البيانات لن تُحفظ حاليًا</p>
+              <ul className="mt-1 list-inside list-disc space-y-0.5 text-amber-800">
+                {cfg.url === 'missing' && (
+                  <li>
+                    متغير <code className="rounded bg-amber-100 px-1">VITE_SUPABASE_URL</code> غير مضبوط في
+                    بيئة البناء (أو مكتوب بدون بادئة <code>VITE_</code>).
+                  </li>
+                )}
+                {cfg.url === 'invalid' && (
+                  <li>
+                    قيمة <code className="rounded bg-amber-100 px-1">VITE_SUPABASE_URL</code> غير صالحة.
+                  </li>
+                )}
+                {cfg.key === 'missing' && (
+                  <li>
+                    متغير <code className="rounded bg-amber-100 px-1">VITE_SUPABASE_ANON_KEY</code> غير
+                    مضبوط في بيئة البناء.
+                  </li>
+                )}
+                <li>بعد ضبط المتغيرين أعد تشغيل البناء والنشر (Deploy) من Netlify.</li>
+              </ul>
             </div>
           )}
           {children}

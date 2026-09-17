@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim()
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
+const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim()
 
 function isValidUrl(s: string): boolean {
   try {
@@ -12,10 +12,38 @@ function isValidUrl(s: string): boolean {
   }
 }
 
-export const isSupabaseConfigured = isValidUrl(supabaseUrl) && supabaseAnonKey.length > 0
+export type SupabaseEnvStatus = 'ok' | 'missing' | 'invalid'
 
-export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
+export interface SupabaseConfigStatus {
+  url: SupabaseEnvStatus
+  key: SupabaseEnvStatus
+}
+
+export function getSupabaseConfigStatus(): SupabaseConfigStatus {
+  const url: SupabaseEnvStatus = !rawUrl
+    ? 'missing'
+    : isValidUrl(rawUrl)
+      ? 'ok'
+      : 'invalid'
+  const key: SupabaseEnvStatus = rawKey ? 'ok' : 'missing'
+  return { url, key }
+}
+
+// فعّال فقط إذا كان الرابط صالحًا والمفتاح موجودًا
+const configStatus = getSupabaseConfigStatus()
+export const isSupabaseConfigured = configStatus.url === 'ok' && configStatus.key === 'ok'
+
+// إنشاء العميل داخل try/catch حتى يستحيل أن تُسقط أي قيمة بيئة التطبيق ببياض
+let client: SupabaseClient | null = null
+if (isSupabaseConfigured) {
+  try {
+    client = createClient(rawUrl, rawKey, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     })
-  : null
+  } catch (err) {
+    console.error('[دفتر العمل] تعذر إنشاء عميل Supabase:', err)
+    client = null
+  }
+}
+
+export const supabase: SupabaseClient | null = client
