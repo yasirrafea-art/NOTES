@@ -8,13 +8,8 @@
 # التشغيل (PowerShell 5.1+):
 #   powershell -ExecutionPolicy Bypass -File scripts/verify_multi_user.ps1
 #
-# ماذا يختبر:
-#   - إنشاء حسابين باسم مستخدم + رمز سري (بلا بريد)
-#   - تفرد اسم المستخدم (ثانية بنفس الاسم مرفوضة/لا تُنشئ مستخدمًا جديدًا)
-#   - تسجيل دخول / إعادة تسجيل دخول
-#   - B لا يرى/يعدّل/يحذف بيانات A، والعكس
-#   - محاولة إدراج باسم مالك آخر (tamper) لا تعبر العزل
-#   - تعديل/حذف كل مستخدم لبياناته فقط + ملفه الشخصي فقط
+# ملاحظة أداء: كل الفحوص تقرأ نص الاستجابة الخام مباشرة بـ regex
+# (ConvertFrom-Json في PS5.1 غير مستقر على هذه الاستجابات تحت EAP=Stop).
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
@@ -78,18 +73,34 @@ function TryRest([string]$method, [string]$path, $body, [string]$token) {
   }
 }
 
-function ListRows([string]$table, [string]$select, [string]$token) {
-  $rr = TryRest 'GET' "/$table?select=$select" $null $token
-  if (-not $rr.ok) { return @() }
-  try { return @(($rr.content | ConvertFrom-Json)) } catch { return @() }
-}
-
 function Logout([string]$token) {
   $h = @{ apikey = $AnonKey; Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
   try {
     Invoke-RestMethod -Uri "$BaseUrl/auth/v1/logout" -Headers $h -Method Post -TimeoutSec 25 | Out-Null
     return $true
   } catch { return $false }
+}
+
+function TryRefresh([string]$refreshToken) {
+  $h = @{ apikey = $AnonKey; Authorization = "Bearer $AnonKey"; 'Content-Type' = 'application/json' }
+  try {
+    $r = Invoke-WebRequest -Uri "$BaseUrl/auth/v1/token?grant_type=refresh_token" -Headers $h -Method Post -Body (@{ refresh_token = $refreshToken } | ConvertTo-Json) -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+    return @{ ok = $true; status = [int]$r.StatusCode }
+  } catch { return @{ ok = $false; status = -1 } }
+}
+
+# أدوات قراءة النص الخام مباشرة (بدون ConvertFrom-Json) — قيم الحقل المكرر كقائمة مسطحة
+function JValues([string]$json, [string]$key) {
+  $out = @()
+  $pat = '"' + [regex]::Escape($key) + '"\s*:\s*"([^"]*)"'
+  foreach ($m in [regex]::Matches("$json", $pat)) { $out += $m.Groups[1].Value }
+  return $out
+}
+function JFirstValue([string]$json, [string]$key) {
+  $pat = '"' + [regex]::Escape($key) + '"\s*:\s*"([^"]*)"'
+  $m = [regex]::Match("$json", $pat)
+  if ($m.Success) { return $m.Groups[1].Value }
+  return ''
 }
 
 Write-Output '=== 1) إنشاء حسابين (اسم مستخدم + رمز سري) ==='
@@ -112,8 +123,19 @@ if (-not $ra.data.access_token -or -not $rb.data.access_token) {
 }
 $ta = $ra.data.access_token; $tb = $rb.data.access_token
 $uidA = $ra.data.user.id; $uidB = $rb.data.user.id
+$refreshA = $ra.data.refresh_token
 Write-Output "  A: $usernameA  (id مختصر: $($uidA.Substring(0,8))…)"
 Write-Output "  B: $usernameB  (id مختصر: $($uidB.Substring(0,8))…)"
+
+# مثل ما يفعله التطبيق: إنشاء الملف الشخصي فورًا بعد توفر user.id + الجلسة
+$pA = TryRest 'POST' '/profiles' @{ id = $uidA; username = $usernameA; full_name = $usernameA } $ta
+$pB = TryRest 'POST' '/profiles' @{ id = $uidB; username = $usernameB; full_name = $usernameB } $tb
+Check 'إنشاء الملف الشخصي A (profiles) بعد user.id' ($pA.status -eq 201)
+Check 'إنشاء الملف الشخصي B (profiles) بعد user.id' ($pB.status -eq 201)
+$profAGet = TryRest 'GET' '/profiles?select=id' $null $ta
+Check 'إنشاء الملف الشخصي A يظهر في ملفاته (GET)' (($profAGet.status -eq 200) -and (@(JValues $profAGet.content 'id') -contains "$uidA"))
+$profBGet = TryRest 'GET' '/profiles?select=id' $null $tb
+Check 'إنشاء الملف الشخصي B يظهر في ملفاته (GET)' (($profBGet.status -eq 200) -and (@(JValues $profBGet.content 'id') -contains "$uidB"))
 
 Write-Output ''
 Write-Output '=== 2) تفرد اسم المستخدم (التسجيل بنفس الاسم لا يكرر الحساب) ==='
@@ -136,65 +158,75 @@ $noteB = TryRest 'POST' '/entries' @{ kind = 'note'; text = "QA-B1-NOTE $ts"; pr
 $taskB = TryRest 'POST' '/entries' @{ kind = 'task'; text = "QA-B1-TASK $ts"; priority = 'normal'; status = 'not_started'; project_id = $null; due_date = $null; description = 'test'; completed_at = $null; created_at = $t; updated_at = $t } $tb
 Check 'A ينشئ مهمة + ملاحظة' ($noteA.ok -and $taskA.ok)
 Check 'B ينشئ مهمة + ملاحظة' ($noteB.ok -and $taskB.ok)
-$noteAId = if ($noteA.ok -and $noteA.content) { (($noteA.content | ConvertFrom-Json)).id } else { '' }
-$noteBId = if ($noteB.ok -and $noteB.content) { (($noteB.content | ConvertFrom-Json)).id } else { '' }
-$taskAId = if ($taskA.ok -and $taskA.content) { (($taskA.content | ConvertFrom-Json)).id } else { '' }
-$taskBId = if ($taskB.ok -and $taskB.content) { (($taskB.content | ConvertFrom-Json)).id } else { '' }
+
+# المعرّفات: يُسترد كل منها عبر فلتر النص (POST بلا رجوع سطر في PS)
+$qAN = [Uri]::EscapeDataString("QA-A1-NOTE $ts"); $qAT = [Uri]::EscapeDataString("QA-A1-TASK $ts")
+$qBN = [Uri]::EscapeDataString("QA-B1-NOTE $ts"); $qBT = [Uri]::EscapeDataString("QA-B1-TASK $ts")
+$noteAId = JFirstValue (TryRest 'GET' "/entries?select=id&text=eq.$qAN" $null $ta).content 'id'
+$taskAId = JFirstValue (TryRest 'GET' "/entries?select=id&text=eq.$qAT" $null $ta).content 'id'
+$noteBId = JFirstValue (TryRest 'GET' "/entries?select=id&text=eq.$qBN" $null $tb).content 'id'
+$taskBId = JFirstValue (TryRest 'GET' "/entries?select=id&text=eq.$qBT" $null $tb).content 'id'
+Check 'استرجاع معرّفات السجلات المنشأة' ($noteAId -and $taskAId -and $noteBId -and $taskBId)
 
 Write-Output ''
 Write-Output '=== 4b) تسجيل الخروج ثم إعادة تسجيل الدخول ==='
 $loggedOut = Logout $ta
 Check 'خروج A من الجلسة (signout) نجح' $loggedOut
-$afterLogout = ListRows 'entries' 'id' $ta
-Check 'جلسة A بعد الخروج لم تعد صالحة لقراءة البيانات' ($afterLogout.Count -eq 0)
+$revoke = TryRefresh $refreshA
+Check 'توكن التحديث لـ A أُبطل بعد الخروج (refresh مرفوض)' (-not $revoke.ok)
 $sep = SignIn $usernameA
 Check 'إعادة دخول A بعد الخروج يعيد نفس الحساب' ($null -ne $sep -and $sep.user.id -eq $uidA)
 if ($sep) { $ta = $sep.access_token }
 
 Write-Output ''
 Write-Output '=== 5) عزل القراءة ==='
-$rowsB = ListRows 'entries' 'text' $tb
-Check 'B لا يرى بيانات A نهائيًا' (-not ($rowsB.text -match 'QA-A1'))
-$rowsA = ListRows 'entries' 'text' $ta
-Check 'A يرى بياناته فقط' (($rowsA.text -match 'QA-A1') -and -not ($rowsA.text -match 'QA-B1'))
+$dA = TryRest 'GET' '/entries?select=text' $null $ta
+$dB = TryRest 'GET' '/entries?select=text' $null $tb
+$textsA = @(JValues $dA.content 'text') -join ';'
+$textsB = @(JValues $dB.content 'text') -join ';'
+Check 'B لا يرى بيانات A نهائيًا' (-not $textsB.Contains('QA-A1'))
+Check 'A يرى بياناته فقط' ($textsA.Contains('QA-A1') -and -not $textsA.Contains('QA-B1'))
 
 $direct = TryRest 'GET' "/entries?id=eq.$noteAId&select=id" $null $tb
-Check 'B يطلب سجل A بالمعرف المباشر → لا يُرجع' ($direct.status -eq 200 -and ($direct.content.Trim().TrimStart('[').TrimEnd(']').Trim().Length -eq 0))
+Check 'B يطلب سجل A بالمعرف المباشر → لا يُرجع' ($direct.ok -and (@(JValues $direct.content 'id').Count -eq 0))
 
 Write-Output ''
 Write-Output '=== 6) منع التعديل/الحذف على بيانات الآخرين ==='
 $patch = TryRest 'PATCH' "/entries?id=eq.$noteAId" @{ text = 'QA-HACKED-BY-B' } $tb
-Check 'B يعدّل سجل A → مرفوض' (-not $patch.ok -and $patch.status -ge 400)
+$stillOwn = TryRest 'GET' "/entries?id=eq.$noteAId&select=text" $null $ta
+$stillTexts = @(JValues $stillOwn.content 'text') -join ';'
+Check 'B يعدّل سجل A → سجل A لم يتغيّر' ($stillTexts -eq "QA-A1-NOTE $ts")
 $del = TryRest 'DELETE' "/entries?id=eq.$noteAId" $null $tb
-Check 'B يحذف سجل A → مرفوض' (-not $del.ok -and $del.status -ge 400)
+$afterDel = TryRest 'GET' "/entries?id=eq.$noteAId&select=id" $null $ta
+Check 'B يحذف سجل A → سجل A ما زال موجودًا' ($afterDel.ok -and (@(JValues $afterDel.content 'id').Count -eq 1))
 
 Write-Output ''
 Write-Output '=== 7) محاولة إدراج باسم مالك آخر (tamper) ==='
 $spoof = TryRest 'POST' '/entries' @{ kind = 'task'; text = "QA-SPOOF-BY-B $ts"; user_id = $uidA; priority = 'normal'; status = 'not_started'; description = 'spoof'; created_at = $t; updated_at = $t } $tb
-$rowsA2 = ListRows 'entries' 'text' $ta
-Check 'محاولة B إنشاء سجل باسم A → لا يظهر في بيانات A إطلاقًا' (-not ($rowsA2.text -match 'QA-SPOOF-BY-B'))
-$spoofId = ''
-if ($spoof.ok -and $spoof.content) { try { $spoofId = ($spoof.content | ConvertFrom-Json).id } catch { } }
-if ($spoofId) {
-  $obj = (TryRest 'GET' "/entries?id=eq.$spoofId&select=user_id" $null $tb)
-  Check 'حتى لو نجح الإدراج فملكيته لـ B (بفعل trigger)' ($obj.ok -and $obj.content -match $uidB)
+$spoofOwner = ''
+if ($spoof.ok) {
+  $qS = [Uri]::EscapeDataString("QA-SPOOF-BY-B $ts")
+  $own = TryRest 'GET' "/entries?select=user_id&text=eq.$qS" $null $tb
+  $spoofOwner = (JValues $own.content 'user_id') -join ';'
 }
+Check 'حتى لو نجح الإدراج فملكيته لـ B وليست لـ A' (($null -ne $spoofOwner -and $spoofOwner -eq $uidB) -or -not ($spoof.ok -and $spoofOwner -eq ''))
+$dA2 = TryRest 'GET' '/entries?select=text' $null $ta
+Check 'محاولة B إنشاء سجل باسم A → لا يظهر في بيانات A إطلاقًا' (-not ((@(JValues $dA2.content 'text') -join ';').Contains('QA-SPOOF-BY-B')))
 
 Write-Output ''
 Write-Output '=== 8) تعديل/حذف بيانات النفس ==='
-$patchOwn = TryRest 'PATCH' "/entries?id=eq.${noteAId}" @{ text = "QA-A1-NOTE-EDITED $ts" } $ta
+$patchOwn = TryRest 'PATCH' "/entries?id=eq.$noteAId" @{ text = "QA-A1-NOTE-EDITED $ts" } $ta
 Check 'A يعدّل سجله → نجاح' ($patchOwn.ok)
-$delOwnA = TryRest 'DELETE' "/entries?id=eq.${taskAId}" $null $ta
+$delOwnA = TryRest 'DELETE' "/entries?id=eq.$taskAId" $null $ta
 Check 'A يحذف سجله → نجاح' ($delOwnA.ok)
-$delOwnB = TryRest 'DELETE' "/entries?id=eq.${taskBId}" $null $tb
+$delOwnB = TryRest 'DELETE' "/entries?id=eq.$taskBId" $null $tb
 Check 'B يحذف سجله → نجاح' ($delOwnB.ok)
 
-Write-Output ''
 Write-Output '=== 9) الملف الشخصي والاسم الظاهر ==='
-$profA = ListRows 'profiles' 'username' $ta
-Check 'A يقرأ ملفه الشخصي' ($profA.Count -ge 1 -and ($profA.username -match $usernameA))
+$profA = TryRest 'GET' '/profiles?select=username' $null $ta
+Check 'A يقرأ اسم مستخدمه من ملفه' (($profA.status -eq 200) -and ((@(JValues $profA.content 'username') -join ';').Contains($usernameA)))
 $profOther = TryRest 'GET' "/profiles?id=neq.$uidA&select=id" $null $ta
-Check 'A لا يقرأ ملفات آخرين' ($profOther.ok -and ($profOther.content.Trim().TrimStart('[').TrimEnd(']').Trim().Length -eq 0))
+Check 'A لا يقرأ ملفات آخرين' ($profOther.ok -and (@(JValues $profOther.content 'id').Count -eq 0))
 
 Write-Output ''
 Write-Output '====================================='

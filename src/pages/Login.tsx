@@ -79,7 +79,9 @@ export default function Login() {
         if (!res.skipped && res.error) {
           setError(res.error)
         } else if (res.needsConfirmation) {
-          setInfo('اكتمل إنشاء الحساب. اضغط "دخول" للدخول مباشرة.')
+          setInfo(
+            'تم إنشاء الحساب، لكن الدخول التلقائي لم يكتمل: خيار "تأكيد البريد" مفعّل في Supabase — أطفئه من Authentication ثم أعد تجربة "دخول".',
+          )
         }
       }
     } catch {

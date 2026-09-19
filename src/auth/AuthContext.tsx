@@ -78,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!alive) return
       const u = session?.user ?? null
+      console.info(`[دفتر العمل][auth:onAuthStateChange] event=${_event} user=${u?.id ?? 'none'}`)
       setUser(u)
       if (u) {
         void refreshProfile(u.id)

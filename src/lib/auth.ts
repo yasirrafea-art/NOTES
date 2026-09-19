@@ -38,12 +38,16 @@ function logAuthError(context: string, err: unknown): void {
   })
 }
 
-// رسائل عربية بسيطة فقط — لا تظهر أي رسالة تقنية من Supabase للمستخدم.
+// رسائل عربية بسيطة إلا عند وجود سبب حقيقي قابل للتشخيص.
 function authError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
   if (msg.includes('Invalid login credentials')) return 'اسم المستخدم أو الرمز السري غير صحيح'
   if (msg.includes('already registered') || msg.includes('already been registered'))
     return 'اسم المستخدم مستخدم مسبقًا'
+  // السبب الحقيقي للـ 429 في التسجيل: إرسال بريد تأكيد (Confirm email مفعّل في Supabase).
+  // أعرضه للمستخدم بعبارة عربية قابلة للتنفيذ بدل الجملة العامة.
+  if (msg.includes('rate limit') || msg.includes('Too Many Requests') || msg.includes('over_email_send_rate_limit'))
+    return 'تعذر إنشاء الحساب: خيار "تأكيد البريد" مفعّل في Supabase ويستنفد حد الإرسال — أطفئه ثم أعد المحاولة.'
   return 'حدث خطأ، حاول مرة أخرى'
 }
 
@@ -118,30 +122,67 @@ export async function signIn(username: string, password: string): Promise<AuthRe
 }
 
 export async function signUp(username: string, password: string): Promise<AuthResult> {
+  const trace: string[] = []
+  const step = (name: string, extra?: unknown): void => {
+    console.info(`[دفتر العمل][signup:${name}]`, extra ?? '')
+    trace.push(name)
+  }
+
+  step('1-validate-username', { username })
   const u = normalizeUsername(username)
   if (!u) return { error: USERNAME_INVALID_MSG }
-  if (authOpsInFlight > 0) return { error: null, skipped: true }
+
+  step('2-validate-password', { len: password.length })
+  if (password.length < 6) return { error: 'الرمز السري قصير جدًا (6 أحرف على الأقل).' }
+
+  if (authOpsInFlight > 0) {
+    step('skip-concurrent-request')
+    return { error: null, skipped: true }
+  }
   authOpsInFlight++
   try {
     needsDb()
+
+    // 3) إنشاء المستخدم داخل Supabase Auth.
+    // لا يُعرض Email في الواجهة أبدًا؛ يستخدم حقل البريد كمعرّف داخلي فريد
+    // بالصيغة  username@workbook.local  (ربط ثابت وواحد لواحد — ليس عشوائيًا)،
+    // وكلمة المرور تُشفَّر تلقائيًا داخل GoTrue (bcrypt) ولا تخزن كنص عادي.
+    const authEmail = toAuthEmail(u)
+    step('3-create-auth-user', { email: authEmail })
     const { data, error } = await supabase!.auth.signUp({
-      email: toAuthEmail(u),
+      email: authEmail,
       password,
       options: { data: { username: u, full_name: u } },
     })
     if (error) {
       logAuthError('signUp', error)
+      step('3-create-auth-user-FAILED', { message: error.message, code: error.code, status: error.status })
       return { error: authError(error) }
     }
+
+    // 4) الحصول على user.id (متوفر حتى إن لم تُمنح جلسة فورية)
     const user = data.user
-    if (!user) return { error: 'حدث خطأ، حاول مرة أخرى' }
+    if (!user) {
+      step('4-no-user-id')
+      return { error: 'حدث خطأ، حاول مرة أخرى' }
+    }
+    step('4-user-id', { id: user.id })
 
-    // إنشاء profile فقط بعد توفر user.id الصحيح ومع جلسة صالحة (auth.uid()).
-    // إن لم تتوفر جلسة فورية، يتولى AuthContext إنشاءه عند وصول تسجيل الدخول
-    // (مسار آمنة وآمن عبر RLS دون طلبات anon مضمونة الفشل).
-    if (data.session) await ensureProfile(user.id, u)
+    // 6) الجلسة: إن لم تكن فورية، فالسبب إعداد الخادم نفسه (Confirm email مفعّل)
+    // ولا يمكن لأي كود عميل تجاوزه بأمان. نعرض رسالة محددة بدل الجملة العامة.
+    if (!data.session) {
+      step('6-no-session-confirm-email-ON')
+      return { error: null, needsConfirmation: true }
+    }
+    step('6-session-ok')
 
-    return { error: null, needsConfirmation: data.session == null }
+    // 5) إنشاء profile بعد توفر user.id + جلسة صالحة (RLS: auth.uid() مسجّل)
+    step('5-create-profile', { id: user.id })
+    await ensureProfile(user.id, u)
+    step('5-create-profile-ok')
+
+    step('7-auto-login-redirect-home')
+    return { error: null }
   } finally {
     authOpsInFlight--
   }
