@@ -84,6 +84,14 @@ function ListRows([string]$table, [string]$select, [string]$token) {
   try { return @(($rr.content | ConvertFrom-Json)) } catch { return @() }
 }
 
+function Logout([string]$token) {
+  $h = @{ apikey = $AnonKey; Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
+  try {
+    Invoke-RestMethod -Uri "$BaseUrl/auth/v1/logout" -Headers $h -Method Post -TimeoutSec 25 | Out-Null
+    return $true
+  } catch { return $false }
+}
+
 Write-Output '=== 1) إنشاء حسابين (اسم مستخدم + رمز سري) ==='
 $ra = SignUp $usernameA
 if (-not $ra.data -or -not $ra.data.access_token) {
@@ -132,6 +140,16 @@ $noteAId = if ($noteA.ok -and $noteA.content) { (($noteA.content | ConvertFrom-J
 $noteBId = if ($noteB.ok -and $noteB.content) { (($noteB.content | ConvertFrom-Json)).id } else { '' }
 $taskAId = if ($taskA.ok -and $taskA.content) { (($taskA.content | ConvertFrom-Json)).id } else { '' }
 $taskBId = if ($taskB.ok -and $taskB.content) { (($taskB.content | ConvertFrom-Json)).id } else { '' }
+
+Write-Output ''
+Write-Output '=== 4b) تسجيل الخروج ثم إعادة تسجيل الدخول ==='
+$loggedOut = Logout $ta
+Check 'خروج A من الجلسة (signout) نجح' $loggedOut
+$afterLogout = ListRows 'entries' 'id' $ta
+Check 'جلسة A بعد الخروج لم تعد صالحة لقراءة البيانات' ($afterLogout.Count -eq 0)
+$sep = SignIn $usernameA
+Check 'إعادة دخول A بعد الخروج يعيد نفس الحساب' ($null -ne $sep -and $sep.user.id -eq $uidA)
+if ($sep) { $ta = $sep.access_token }
 
 Write-Output ''
 Write-Output '=== 5) عزل القراءة ==='

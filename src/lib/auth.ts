@@ -19,6 +19,25 @@ const EMAIL_DOMAIN = 'workbook.local'
 export const USERNAME_INVALID_MSG =
   'اسم المستخدم يجب أن يتكون من 3-24 حرفًا (حروف إنجليزية، أرقام، أو _ . -).'
 
+// سجّل تفاصيل الخطأ التقنية كاملة في console (للمطور)
+// مع بقاء الرسالة المعروضة للمستخدم عربية بسيطة.
+function logAuthError(context: string, err: unknown): void {
+  const e = err as {
+    message?: string
+    code?: string
+    details?: string
+    hint?: string
+    status?: number
+  } | null
+  console.error(`[دفتر العمل] خطأ في ${context}:`, {
+    message: e?.message ?? String(err),
+    code: e?.code ?? null,
+    details: e?.details ?? null,
+    hint: e?.hint ?? null,
+    status: e?.status ?? null,
+  })
+}
+
 // رسائل عربية بسيطة فقط — لا تظهر أي رسالة تقنية من Supabase للمستخدم.
 function authError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
@@ -51,7 +70,10 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     .select('id, username, full_name')
     .eq('id', userId)
     .maybeSingle()
-  if (error) return null
+  if (error) {
+    logAuthError('getProfile', error)
+    return null
+  }
   if (!data) return null
   return {
     id: data.id as string,
@@ -70,7 +92,7 @@ export async function ensureProfile(userId: string, username?: string | null): P
     },
     { onConflict: 'id' },
   )
-  if (error) console.error('[دفتر العمل] تعذر إنشاء الملف الشخصي:', error)
+  if (error) logAuthError('ensureProfile', error)
 }
 
 // قفل يحول دون إرسال أكثر من طلب واحد لنفس العملية (دخول/إنشاء) في الوقت نفسه،
@@ -88,6 +110,7 @@ export async function signIn(username: string, password: string): Promise<AuthRe
       email: toAuthEmail(u),
       password,
     })
+    if (error) logAuthError('signIn', error)
     return { error: error ? authError(error) : null }
   } finally {
     authOpsInFlight--
@@ -106,9 +129,18 @@ export async function signUp(username: string, password: string): Promise<AuthRe
       password,
       options: { data: { username: u, full_name: u } },
     })
-    if (error) return { error: authError(error) }
+    if (error) {
+      logAuthError('signUp', error)
+      return { error: authError(error) }
+    }
     const user = data.user
-    if (user) await ensureProfile(user.id, u)
+    if (!user) return { error: 'حدث خطأ، حاول مرة أخرى' }
+
+    // إنشاء profile فقط بعد توفر user.id الصحيح ومع جلسة صالحة (auth.uid()).
+    // إن لم تتوفر جلسة فورية، يتولى AuthContext إنشاءه عند وصول تسجيل الدخول
+    // (مسار آمنة وآمن عبر RLS دون طلبات anon مضمونة الفشل).
+    if (data.session) await ensureProfile(user.id, u)
+
     return { error: null, needsConfirmation: data.session == null }
   } finally {
     authOpsInFlight--

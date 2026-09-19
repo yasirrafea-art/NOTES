@@ -15,6 +15,22 @@
 begin;
 
 -- ------------------------------------------------------------
+-- 0) حذف السياسات القديمة أولًا
+--    السياسات entries_anon/..._all_auth تعتمد على عمود user_id بنوعه text؛
+--    PostgreSQL يمنع تغيير نوع عمود مستخدم في تعريف سياسة، لذا يُحذف قبل التحويل.
+--    (علمًا بأنها تُحذف أيضًا في القسم 6 لاحقًا؛ هنا مبكرًا لإتاحة الـ ALTER)
+-- ------------------------------------------------------------
+drop policy if exists entries_anon on public.entries;
+drop policy if exists projects_anon on public.projects;
+drop policy if exists activities_anon on public.activities;
+drop policy if exists attachments_anon on public.attachments;
+
+drop policy if exists entries_all_auth on public.entries;
+drop policy if exists projects_all_auth on public.projects;
+drop policy if exists activities_all_auth on public.activities;
+drop policy if exists attachments_all_auth on public.attachments;
+
+-- ------------------------------------------------------------
 -- 1) تحويل user_id من text إلى uuid مع معالجة آمنة للقيم القديمة
 --    (لا حذف لأي سجل؛ فقط القيم غير الصالحة تصبح null)
 -- ------------------------------------------------------------
