@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BookOpenText } from 'lucide-react'
 import { signIn, signUp, USERNAME_INVALID_MSG } from '../lib/auth'
@@ -6,9 +7,9 @@ import { useAuth } from '../auth/AuthContext'
 
 type Mode = 'signin' | 'signup'
 
-const MODE_META: Record<Mode, { title: string; submit: string; hint: string }> = {
-  signin: { title: 'تسجيل الدخول', submit: 'تسجيل الدخول', hint: 'أهلًا بعودتك — سجّل دخولك باسم المستخدم الخاص بك.' },
-  signup: { title: 'إنشاء حساب جديد', submit: 'إنشاء الحساب', hint: 'أنشئ حسابك لاستخدام دفتر العمل الخاص بك.' },
+const MODE_META: Record<Mode, { title: string; submit: string; busy: string; hint: string }> = {
+  signin: { title: 'تسجيل الدخول', submit: 'دخول', busy: 'جارٍ الدخول...', hint: 'أهلًا بعودتك — سجّل دخولك باسم المستخدم الخاص بك.' },
+  signup: { title: 'إنشاء حساب جديد', submit: 'إنشاء الحساب', busy: 'جارٍ إنشاء الحساب...', hint: 'أنشئ حسابك لبدء استخدام دفتر العمل.' },
 }
 
 export default function Login() {
@@ -20,6 +21,7 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
+  const busyRef = useRef(false)
 
   if (user) return <Navigate to="/" replace />
 
@@ -31,44 +33,59 @@ export default function Login() {
     setInfo(null)
   }
 
-  const canSubmit =
-    username.trim().length > 0 &&
-    password.length > 0 &&
-    (mode !== 'signup' || (confirm.length > 0 && password === confirm)) &&
-    !busy
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (busyRef.current) return
+    const u = username.trim().toLowerCase()
 
-  async function submit() {
-    if (busy) return
+    if (mode === 'signin') {
+      if (!u) {
+        setError('ادخل اسم المستخدم.')
+        return
+      }
+      if (!password) {
+        setError('ادخل الرمز السري.')
+        return
+      }
+    } else {
+      if (!u) {
+        setError('ادخل اسم المستخدم.')
+        return
+      }
+      if (!/^[a-z0-9._-]{3,24}$/.test(u)) {
+        setError(USERNAME_INVALID_MSG)
+        return
+      }
+      if (password.length < 6) {
+        setError('الرمز السري قصير جدًا (6 أحرف على الأقل).')
+        return
+      }
+      if (password !== confirm) {
+        setError('الرمزان غير متطابقين')
+        return
+      }
+    }
+
+    busyRef.current = true
     setBusy(true)
     setError(null)
     setInfo(null)
     try {
       if (mode === 'signin') {
-        const res = await signIn(username, password)
-        if (res.error) setError(res.error)
+        const res = await signIn(u, password)
+        if (!res.skipped && res.error) setError(res.error)
       } else {
-        if (!/^[a-z0-9._-]{3,24}$/i.test(username.trim())) {
-          setError(USERNAME_INVALID_MSG)
-          return
-        }
-        if (password.length < 6) {
-          setError('الرمز السري يجب أن يكون 6 أحرف على الأقل.')
-          return
-        }
-        if (password !== confirm) {
-          setError('الرمز السري وتأكيده غير متطابقين.')
-          return
-        }
-        const res = await signUp(username, password)
-        if (res.error) {
+        const res = await signUp(u, password)
+        if (!res.skipped && res.error) {
           setError(res.error)
         } else if (res.needsConfirmation) {
-          setInfo(
-            'تم إنشاء الحساب، لكن الجلسة لم تُمنح فورًا — أطفئ "Confirm email" في لوحة Supabase ليتمكن تسجيل الدخول، ثم أعد المحاولة.',
-          )
+          setInfo('اكتمل إنشاء الحساب. اضغط "دخول" للدخول مباشرة.')
         }
       }
+    } catch {
+      setError('حدث خطأ، حاول مرة أخرى')
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
@@ -94,7 +111,7 @@ export default function Login() {
             <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">{info}</p>
           )}
 
-          <div className="mt-5 space-y-3">
+          <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-3">
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -128,23 +145,18 @@ export default function Login() {
                 style={{ textAlign: 'end' }}
               />
             )}
-            {mode === 'signup' && (
-              <p className="text-xs text-slate-400">
-                اسم المستخدم: 3-24 حرفًا (حروف إنجليزية، أرقام، أو _ . -) — الرمز السري: 6 أحرف على الأقل.
-              </p>
-            )}
-            <button onClick={() => void submit()} disabled={!canSubmit} className="btn-primary w-full">
-              {busy ? '...' : meta.submit}
+            <button type="submit" disabled={busy} className="btn-primary w-full">
+              {busy ? meta.busy : meta.submit}
             </button>
-          </div>
+          </form>
 
           <div className="mt-5 border-t border-slate-100 pt-4 text-center text-sm">
             {mode === 'signin' ? (
-              <button onClick={() => switchMode('signup')} className="font-semibold text-brand-600 hover:text-brand-700">
+              <button type="button" onClick={() => switchMode('signup')} className="font-semibold text-brand-600 hover:text-brand-700">
                 إنشاء حساب جديد
               </button>
             ) : (
-              <button onClick={() => switchMode('signin')} className="font-semibold text-brand-600 hover:text-brand-700">
+              <button type="button" onClick={() => switchMode('signin')} className="font-semibold text-brand-600 hover:text-brand-700">
                 لدي حساب — تسجيل الدخول
               </button>
             )}

@@ -1,4 +1,4 @@
-﻿﻿# ============================================================
+﻿# ============================================================
 # دفتر العمل — تحقق آلي من نظام Username + عزل المستخدمين
 # الشرط المسبق: تطبيق
 #   supabase/migrations/002_multi_user_rls.sql
@@ -62,10 +62,19 @@ function TryRest([string]$method, [string]$path, $body, [string]$token) {
   $h = @{ apikey = $AnonKey; Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
   $json = if ($null -ne $body) { $body | ConvertTo-Json -Depth 6 } else { $null }
   try {
-    $r = Invoke-WebRequest -Uri "$BaseUrl/rest/v1$path" -Headers $h -Method $method -Body $json -UseBasicParsing -TimeoutSec 25 -SkipHttpErrorCheck -ErrorAction Stop
-    return @{ ok = ($r.StatusCode -lt 400); status = $r.StatusCode; content = $r.Content }
+    $r = Invoke-WebRequest -Uri "$BaseUrl/rest/v1$path" -Headers $h -Method $method -Body $json -UseBasicParsing -TimeoutSec 25 -ErrorAction Stop
+    return @{ ok = ($r.StatusCode -lt 400); status = [int]$r.StatusCode; content = $r.Content }
   } catch {
-    return @{ ok = $false; status = -1; content = $_.Exception.Message }
+    $status = -1
+    $content = $_.Exception.Message
+    if ($_.Exception.Response) {
+      $status = [int]$_.Exception.Response.StatusCode
+      try {
+        $sr = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
+        $content = $sr.ReadToEnd()
+      } catch { }
+    }
+    return @{ ok = ($status -ge 200 -and $status -lt 400); status = $status; content = $content }
   }
 }
 
