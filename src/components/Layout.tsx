@@ -46,7 +46,8 @@ function bottomLinkCls({ isActive }: { isActive: boolean }) {
 export default function Layout({ children }: { children: ReactNode }) {
   const cfg = getSupabaseConfigStatus()
   const { user, profile, logout } = useAuth()
-  const displayedName = profile?.fullName ?? user?.email?.split('@')[0] ?? 'مستخدم'
+  const displayedName = profile?.fullName ?? profile?.username ?? 'مستخدم'
+  const displayedUsername = profile?.username ?? (user?.email ? user.email.split('@')[0] : '')
   return (
     <div className="min-h-dvh">
       <aside className="fixed start-0 top-0 bottom-0 z-40 hidden w-72 flex-col border-e border-slate-200 bg-white lg:flex">
@@ -76,7 +77,9 @@ export default function Layout({ children }: { children: ReactNode }) {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-slate-800">{displayedName}</p>
-                <p className="truncate text-xs text-slate-400">{user.email}</p>
+                <p className="truncate text-xs text-slate-400" dir="ltr" style={{ textAlign: 'right' }}>
+                  @{displayedUsername}
+                </p>
               </div>
               <button
                 onClick={() => void logout()}

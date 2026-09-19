@@ -1,23 +1,22 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BookOpenText } from 'lucide-react'
-import { resetPassword, signIn, signUp } from '../lib/auth'
+import { signIn, signUp, USERNAME_INVALID_MSG } from '../lib/auth'
 import { useAuth } from '../auth/AuthContext'
 
-type Mode = 'signin' | 'signup' | 'forgot'
+type Mode = 'signin' | 'signup'
 
 const MODE_META: Record<Mode, { title: string; submit: string; hint: string }> = {
-  signin: { title: 'تسجيل الدخول', submit: 'دخول', hint: 'أهلًا بعودتك — سجّل دخولك لمتابعة عملك.' },
-  signup: { title: 'إنشاء حساب جديد', submit: 'إنشاء الحساب', hint: 'أنشئ حسابك المجاني لاستخدام دفتر العمل الخاص بك.' },
-  forgot: { title: 'استعادة كلمة المرور', submit: 'إرسال رابط الاستعادة', hint: 'سنرسل لك رابطًا لإعادة تعيين كلمة المرور.' },
+  signin: { title: 'تسجيل الدخول', submit: 'تسجيل الدخول', hint: 'أهلًا بعودتك — سجّل دخولك باسم المستخدم الخاص بك.' },
+  signup: { title: 'إنشاء حساب جديد', submit: 'إنشاء الحساب', hint: 'أنشئ حسابك لاستخدام دفتر العمل الخاص بك.' },
 }
 
 export default function Login() {
   const { user } = useAuth()
   const [mode, setMode] = useState<Mode>('signin')
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
@@ -33,9 +32,9 @@ export default function Login() {
   }
 
   const canSubmit =
-    email.trim().length > 0 &&
-    (mode === 'forgot' || password.length > 0) &&
-    (mode !== 'signup' || name.trim().length > 0) &&
+    username.trim().length > 0 &&
+    password.length > 0 &&
+    (mode !== 'signup' || (confirm.length > 0 && password === confirm)) &&
     !busy
 
   async function submit() {
@@ -43,22 +42,32 @@ export default function Login() {
     setBusy(true)
     setError(null)
     setInfo(null)
-    let res: { error: string | null; needsConfirmation?: boolean } = { error: null }
     try {
       if (mode === 'signin') {
-        res = await signIn(email.trim(), password)
-      } else if (mode === 'signup') {
-        res = await signUp(email.trim(), password, name)
-        if (!res.error && res.needsConfirmation) {
-          setInfo('تم إنشاء الحساب! تحقق من بريدك الإلكتروني لتأكيد الحساب قبل تسجيل الدخول.')
-        }
+        const res = await signIn(username, password)
+        if (res.error) setError(res.error)
       } else {
-        res = await resetPassword(email.trim())
-        if (!res.error) {
-          setInfo('إذا كان البريد مسجلًا عندنا، سيصلك رابط إعادة تعيين كلمة المرور.')
+        if (!/^[a-z0-9._-]{3,24}$/i.test(username.trim())) {
+          setError(USERNAME_INVALID_MSG)
+          return
+        }
+        if (password.length < 6) {
+          setError('الرمز السري يجب أن يكون 6 أحرف على الأقل.')
+          return
+        }
+        if (password !== confirm) {
+          setError('الرمز السري وتأكيده غير متطابقين.')
+          return
+        }
+        const res = await signUp(username, password)
+        if (res.error) {
+          setError(res.error)
+        } else if (res.needsConfirmation) {
+          setInfo(
+            'تم إنشاء الحساب، لكن الجلسة لم تُمنح فورًا — أطفئ "Confirm email" في لوحة Supabase ليتمكن تسجيل الدخول، ثم أعد المحاولة.',
+          )
         }
       }
-      if (res.error) setError(res.error)
     } finally {
       setBusy(false)
     }
@@ -86,66 +95,57 @@ export default function Login() {
           )}
 
           <div className="mt-5 space-y-3">
-            {mode === 'signup' && (
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="الاسم الذي سيظهر داخل النظام"
-                className="input"
-              />
-            )}
             <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              type="email"
-              placeholder="البريد الإلكتروني"
-              autoComplete="email"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="اسم المستخدم"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="input"
               dir="ltr"
               style={{ textAlign: 'end' }}
             />
-            {mode !== 'forgot' && (
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              placeholder="الرمز السري"
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+              className="input"
+              dir="ltr"
+              style={{ textAlign: 'end' }}
+            />
+            {mode === 'signup' && (
               <input
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
                 type="password"
-                placeholder="كلمة المرور"
-                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                placeholder="تأكيد الرمز السري"
+                autoComplete="new-password"
                 className="input"
                 dir="ltr"
                 style={{ textAlign: 'end' }}
               />
             )}
-            <button
-              onClick={() => void submit()}
-              disabled={!canSubmit}
-              className="btn-primary w-full"
-            >
+            {mode === 'signup' && (
+              <p className="text-xs text-slate-400">
+                اسم المستخدم: 3-24 حرفًا (حروف إنجليزية، أرقام، أو _ . -) — الرمز السري: 6 أحرف على الأقل.
+              </p>
+            )}
+            <button onClick={() => void submit()} disabled={!canSubmit} className="btn-primary w-full">
               {busy ? '...' : meta.submit}
             </button>
           </div>
 
-          <div className="mt-5 space-y-1.5 border-t border-slate-100 pt-4 text-center text-sm">
-            {mode === 'signin' && (
-              <>
-                <button onClick={() => switchMode('signup')} className="font-semibold text-brand-600 hover:text-brand-700">
-                  إنشاء حساب جديد
-                </button>
-                <div>
-                  <button onClick={() => switchMode('forgot')} className="text-slate-500 hover:text-brand-600">
-                    نسيت كلمة المرور؟
-                  </button>
-                </div>
-              </>
-            )}
-            {mode === 'signup' && (
+          <div className="mt-5 border-t border-slate-100 pt-4 text-center text-sm">
+            {mode === 'signin' ? (
+              <button onClick={() => switchMode('signup')} className="font-semibold text-brand-600 hover:text-brand-700">
+                إنشاء حساب جديد
+              </button>
+            ) : (
               <button onClick={() => switchMode('signin')} className="font-semibold text-brand-600 hover:text-brand-700">
                 لدي حساب — تسجيل الدخول
-              </button>
-            )}
-            {mode === 'forgot' && (
-              <button onClick={() => switchMode('signin')} className="font-semibold text-brand-600 hover:text-brand-700">
-                رجوع إلى تسجيل الدخول
               </button>
             )}
           </div>
