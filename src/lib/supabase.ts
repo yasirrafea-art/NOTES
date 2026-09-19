@@ -38,7 +38,11 @@ let client: SupabaseClient | null = null
 if (isSupabaseConfigured) {
   try {
     client = createClient(rawUrl, rawKey, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
     })
   } catch (err) {
     console.error('[دفتر العمل] تعذر إنشاء عميل Supabase:', err)

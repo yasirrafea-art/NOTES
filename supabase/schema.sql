@@ -1,5 +1,10 @@
 -- دفتر العمل — Supabase schema (قابل لإعادة التشغيل بأمان)
 -- جداول: projects, entries, activities, attachments
+--
+-- ⚠️ ملاحظة مهمة: هذا الملف هو البنية الأساسية القديمة (Single-User).
+-- بعد تطبيق `supabase/migrations/002_multi_user_rls.sql` لا تعِد تشغيل هذا
+-- الملف، لأن قسم "سياسات مؤقتة" أدناه سيعيد إنشاء سياسات anon (الكل يقرأ/يكتب)
+-- ويكسر عزل المستخدمين. استخدم 002 وما بعده للتحويل إلى Multi-User.
 
 create table if not exists public.projects (
   id uuid primary key default gen_random_uuid(),

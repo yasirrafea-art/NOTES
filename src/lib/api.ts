@@ -9,6 +9,14 @@ function check(): void {
   if (!isSupabaseConfigured || !supabase) throw new Error(CONNECTION_ERROR)
 }
 
+// معرف المستخدم الحالي من جلسة Supabase (نفس auth.uid()) — لا يُؤخذ من أي input
+async function uid(): Promise<string> {
+  check()
+  const { data, error } = await supabase!.auth.getUser()
+  if (error || !data.user) throw new Error(CONNECTION_ERROR)
+  return data.user.id
+}
+
 function fail(err: unknown): never {
   console.error('[دفتر العمل] خطأ Supabase:', err)
   throw new Error(CONNECTION_ERROR)
@@ -153,6 +161,7 @@ export const api = {
         due_date: e.dueDate ?? null,
         description: e.description ?? null,
         completed_at: null,
+        user_id: await uid(),
         created_at: t,
         updated_at: t,
       })
@@ -211,6 +220,7 @@ export const api = {
         name: p.name,
         description: p.description ?? null,
         color: p.color ?? 'violet',
+        user_id: await uid(),
         created_at: t,
         updated_at: t,
       })
@@ -264,6 +274,7 @@ export const api = {
         type: a.type,
         kind: a.kind ?? null,
         text: a.text,
+        user_id: await uid(),
         created_at: nowISO(),
       })
       if (error) {

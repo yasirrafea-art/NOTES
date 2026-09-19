@@ -7,6 +7,17 @@ import { api, CONNECTION_ERROR } from './api'
 
 const channels = new Map<string, RealtimeChannel>()
 
+export function closeChannels(): void {
+  channels.forEach((ch) => {
+    try {
+      supabase?.removeChannel(ch)
+    } catch {
+      // تجاهل أي خطأ أثناء الإزالة
+    }
+  })
+  channels.clear()
+}
+
 function ensureChannel(table: string): void {
   if (!isSupabaseConfigured || !supabase || channels.has(table)) return
   const ch = supabase

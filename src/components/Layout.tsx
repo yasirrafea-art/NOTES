@@ -6,12 +6,14 @@ import {
   History,
   House,
   ListTodo,
+  LogOut,
   NotebookPen,
   Search,
   Database,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { isSupabaseConfigured, getSupabaseConfigStatus } from '../lib/supabase'
+import { useAuth } from '../auth/AuthContext'
 
 const sidebarNav: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: '/', label: 'الرئيسية', icon: House, end: true },
@@ -43,6 +45,8 @@ function bottomLinkCls({ isActive }: { isActive: boolean }) {
 
 export default function Layout({ children }: { children: ReactNode }) {
   const cfg = getSupabaseConfigStatus()
+  const { user, profile, logout } = useAuth()
+  const displayedName = profile?.fullName ?? user?.email?.split('@')[0] ?? 'مستخدم'
   return (
     <div className="min-h-dvh">
       <aside className="fixed start-0 top-0 bottom-0 z-40 hidden w-72 flex-col border-e border-slate-200 bg-white lg:flex">
@@ -60,11 +64,29 @@ export default function Layout({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
-        <div className="px-5 py-4">
+        <div className="border-t border-slate-200 px-5 py-4">
           <p className="flex items-center gap-1.5 text-xs text-slate-400">
             <Database className="h-3.5 w-3.5" />
             {isSupabaseConfigured ? 'بياناتك محفوظة في السحابة (Supabase)' : 'التخزين السحابي غير مفعّل بعد'}
           </p>
+          {user && (
+            <div className="mt-3 flex items-center gap-2.5">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
+                {displayedName.slice(0, 1)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-slate-800">{displayedName}</p>
+                <p className="truncate text-xs text-slate-400">{user.email}</p>
+              </div>
+              <button
+                onClick={() => void logout()}
+                title="تسجيل الخروج"
+                className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -83,6 +105,13 @@ export default function Layout({ children }: { children: ReactNode }) {
             <Link to="/search" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" title="البحث">
               <Search className="h-5 w-5" />
             </Link>
+            <button
+              onClick={() => void logout()}
+              className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600"
+              title="تسجيل الخروج"
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
           </div>
         </div>
       </header>
